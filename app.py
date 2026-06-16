@@ -15,7 +15,7 @@ st.set_page_config(
     layout="wide"
 )
 
-client = genai.Client(api_key="")
+client = genai.Client(api_key="YOUR_API_KEY")
 
 MODEL_NAME = "models/gemini-2.5-flash"
 
