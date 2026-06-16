@@ -12,6 +12,13 @@ This AI-powered assistant helps data engineers by:
 
 ---
 
+## 🌐 Live Demo
+
+Streamlit App:
+https://mounisha-ai-airflow-agent.streamlit.app/
+
+---
+
 ## 🧠 Architecture
 
 User → Streamlit UI → Agent Router → {RAG Search / DAG Generator / Error Analyzer} → Gemini LLM → Response
