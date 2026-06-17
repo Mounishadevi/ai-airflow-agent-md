@@ -4,6 +4,7 @@ from sentence_transformers import SentenceTransformer
 import os
 
 from google import genai
+from google.genai import types
 
 # ==========================
 # CONFIG
@@ -59,6 +60,20 @@ def load_embedding_model():
 embedding_model = load_embedding_model()
 
 # ==========================
+# SAFE TEXT EXTRACTOR
+# (Gemini 2.5 Flash can return None text if it spends its whole
+# token budget on internal "thinking" before producing output)
+# ==========================
+
+def safe_text(response, fallback="Sorry, I couldn't generate a response for that. Could you rephrase the question?"):
+    try:
+        if response and response.text:
+            return response.text
+    except Exception:
+        pass
+    return fallback
+
+# ==========================
 # TOOL 1 - DAG GENERATOR
 # ==========================
 
@@ -83,10 +98,13 @@ Rules:
     response = client.models.generate_content(
         model=MODEL_NAME,
         contents=prompt,
-        config={"max_output_tokens": 1500}
+        config=types.GenerateContentConfig(
+            max_output_tokens=4000,
+            thinking_config=types.ThinkingConfig(thinking_budget=512)
+        )
     )
 
-    return response.text
+    return safe_text(response, fallback="Sorry, I couldn't generate the DAG. Please try rephrasing your requirement.")
 
 # ==========================
 # TOOL 2 - ERROR ANALYZER
@@ -114,10 +132,13 @@ Rules:
     response = client.models.generate_content(
         model=MODEL_NAME,
         contents=prompt,
-        config={"max_output_tokens": 500}
+        config=types.GenerateContentConfig(
+            max_output_tokens=600,
+            thinking_config=types.ThinkingConfig(thinking_budget=0)
+        )
     )
 
-    return response.text
+    return safe_text(response, fallback="Sorry, I couldn't analyze that error. Please try pasting it again.")
 
 # ==========================
 # TOOL 3 - RAG SEARCH
@@ -153,10 +174,13 @@ Rules:
     response = client.models.generate_content(
         model=MODEL_NAME,
         contents=prompt,
-        config={"max_output_tokens": 400}
+        config=types.GenerateContentConfig(
+            max_output_tokens=500,
+            thinking_config=types.ThinkingConfig(thinking_budget=0)
+        )
     )
 
-    return response.text
+    return safe_text(response, fallback="Sorry, I couldn't find a good answer to that. Could you rephrase the question?")
 
 # ==========================
 # AGENT ROUTER (intent classification, not keyword matching)
@@ -179,10 +203,14 @@ Category:"""
     response = client.models.generate_content(
         model=MODEL_NAME,
         contents=prompt,
-        config={"max_output_tokens": 20}
+        config=types.GenerateContentConfig(
+            max_output_tokens=50,
+            thinking_config=types.ThinkingConfig(thinking_budget=0)
+        )
     )
 
-    return response.text.strip().upper()
+    text = safe_text(response, fallback="QA")
+    return text.strip().upper()
 
 def agent(query):
 
