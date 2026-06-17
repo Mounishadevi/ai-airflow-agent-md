@@ -87,12 +87,14 @@ Generate a production-ready Airflow DAG.
 Requirement:
 {requirement}
 
-Rules:
-- retries
-- schedule
-- email alerts
-- best practices
-- return ONLY Python code
+Requirements:
+- Use default_args
+- Include retries
+- Include logging
+- Include email alerts
+- Follow Airflow best practices
+- Add useful comments
+- Return ONLY Python code
 """
 
     response = client.models.generate_content(
@@ -100,7 +102,7 @@ Rules:
         contents=prompt,
         config=types.GenerateContentConfig(
             max_output_tokens=4000,
-            thinking_config=types.ThinkingConfig(thinking_budget=512)
+            thinking_config=types.ThinkingConfig(thinking_budget=256)
         )
     )
 
@@ -113,20 +115,20 @@ Rules:
 def explain_error(error_text):
 
     prompt = f"""
-You are an Airflow + ETL expert.
+You are an Airflow, Hive, Spark and ETL troubleshooting expert.
 
-Analyze this error:
+Analyze:
 
 {error_text}
 
 Rules:
-- If this is a simple, well-known error, answer in 2-4 short sentences covering cause and fix. Do not use headings for simple errors.
-- Only use the structured format below if the error is genuinely complex or ambiguous:
+- For common errors, provide Cause and Fix only.
+- For complex errors, provide:
   1. Root Cause
   2. Impact
   3. Fix
   4. Prevention
-- Be direct. No restating the error back, no filler intro sentences.
+- Be practical and concise.
 """
 
     response = client.models.generate_content(
@@ -156,19 +158,25 @@ def rag_search(question):
     context = "\n\n".join(results["documents"][0])
 
     prompt = f"""
-You are an Apache Airflow expert.
+You are a senior Apache Airflow and ETL expert.
 
-Use this context:
+Use the context when relevant.
 
+Context:
 {context}
 
 Question:
 {question}
 
 Rules:
-- Answer in 2-4 sentences unless the question explicitly asks for steps, a list, or a detailed explanation.
-- No preamble such as "Based on the context provided...". Answer directly.
-- Only go longer if the question genuinely requires it.
+- Answer according to the complexity of the question.
+- Simple questions: answer in 2-4 sentences.
+- Conceptual questions: provide a medium-length explanation.
+- How-to questions: provide step-by-step guidance.
+- Comparison questions: use bullets or a table.
+- Generate code only if explicitly requested.
+- Do not mention the context source.
+- Be concise but complete.
 """
 
     response = client.models.generate_content(
@@ -188,43 +196,52 @@ Rules:
 
 def classify_intent(query):
 
-    prompt = f"""Classify the user query into exactly one category. Respond with ONLY the category name, nothing else.
+    q = query.lower()
 
-Categories:
-- GENERATE_DAG: user explicitly wants you to create, write, or build a new Airflow DAG or pipeline code.
-- EXPLAIN_ERROR: user is pasting or describing an error, exception, traceback, or failure and wants it diagnosed.
-- QA: user is asking a conceptual, informational, or how-it-works question (including questions that merely mention "DAG", "pipeline", or "workflow" without asking you to generate one).
+    dag_generation_keywords = [
+        "generate dag",
+        "create dag",
+        "write dag",
+        "build dag",
+        "dag code",
+        "airflow code",
+        "create airflow dag",
+        "generate airflow dag"
+    ]
 
-Query:
-{query}
+    error_keywords = [
+        "error",
+        "exception",
+        "traceback",
+        "failed",
+        "failure",
+        "ora-",
+        "sparkexception",
+        "hiveexception",
+        "task failed"
+    ]
 
-Category:"""
+    if any(k in q for k in dag_generation_keywords):
+        return "GENERATE_DAG"
 
-    response = client.models.generate_content(
-        model=MODEL_NAME,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            max_output_tokens=50,
-            thinking_config=types.ThinkingConfig(thinking_budget=0)
-        )
-    )
+    if any(k in q for k in error_keywords):
+        return "EXPLAIN_ERROR"
 
-    text = safe_text(response, fallback="QA")
-    return text.strip().upper()
+    return "QA"
 
 def agent(query):
 
     intent = classify_intent(query)
 
-    if "GENERATE_DAG" in intent:
+    if intent == "GENERATE_DAG":
         return generate_dag(query)
 
-    elif "EXPLAIN_ERROR" in intent:
+    elif intent == "EXPLAIN_ERROR":
         return explain_error(query)
 
     else:
         return rag_search(query)
-
+        
 # ==========================
 # UI HEADER
 # ==========================
