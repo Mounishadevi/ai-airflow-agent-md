@@ -6,7 +6,7 @@ model = SentenceTransformer("all-MiniLM-L6-v2")
 
 # 2. Create / open ChromaDB
 client = chromadb.PersistentClient(path="./chroma_db")
-collection = client.get_or_create_collection("airflow_docs")
+collection = client.get_or_create_collection("airflow")
 
 # 3. Sample knowledge (you can expand later)
 docs = [
