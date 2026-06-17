@@ -82,7 +82,8 @@ Rules:
 
     response = client.models.generate_content(
         model=MODEL_NAME,
-        contents=prompt
+        contents=prompt,
+        config={"max_output_tokens": 1500}
     )
 
     return response.text
@@ -100,16 +101,20 @@ Analyze this error:
 
 {error_text}
 
-Provide:
-1. Root Cause
-2. Impact
-3. Fix
-4. Prevention
+Rules:
+- If this is a simple, well-known error, answer in 2-4 short sentences covering cause and fix. Do not use headings for simple errors.
+- Only use the structured format below if the error is genuinely complex or ambiguous:
+  1. Root Cause
+  2. Impact
+  3. Fix
+  4. Prevention
+- Be direct. No restating the error back, no filler intro sentences.
 """
 
     response = client.models.generate_content(
         model=MODEL_NAME,
-        contents=prompt
+        contents=prompt,
+        config={"max_output_tokens": 500}
     )
 
     return response.text
@@ -138,32 +143,55 @@ Use this context:
 
 Question:
 {question}
+
+Rules:
+- Answer in 2-4 sentences unless the question explicitly asks for steps, a list, or a detailed explanation.
+- No preamble such as "Based on the context provided...". Answer directly.
+- Only go longer if the question genuinely requires it.
 """
 
     response = client.models.generate_content(
         model=MODEL_NAME,
-        contents=prompt
+        contents=prompt,
+        config={"max_output_tokens": 400}
     )
 
     return response.text
 
 # ==========================
-# AGENT ROUTER
+# AGENT ROUTER (intent classification, not keyword matching)
 # ==========================
+
+def classify_intent(query):
+
+    prompt = f"""Classify the user query into exactly one category. Respond with ONLY the category name, nothing else.
+
+Categories:
+- GENERATE_DAG: user explicitly wants you to create, write, or build a new Airflow DAG or pipeline code.
+- EXPLAIN_ERROR: user is pasting or describing an error, exception, traceback, or failure and wants it diagnosed.
+- QA: user is asking a conceptual, informational, or how-it-works question (including questions that merely mention "DAG", "pipeline", or "workflow" without asking you to generate one).
+
+Query:
+{query}
+
+Category:"""
+
+    response = client.models.generate_content(
+        model=MODEL_NAME,
+        contents=prompt,
+        config={"max_output_tokens": 20}
+    )
+
+    return response.text.strip().upper()
 
 def agent(query):
 
-    q = query.lower()
+    intent = classify_intent(query)
 
-    if "dag" in q or "pipeline" in q or "workflow" in q:
+    if "GENERATE_DAG" in intent:
         return generate_dag(query)
 
-    elif (
-        "error" in q or
-        "failed" in q or
-        "exception" in q or
-        "ora-" in q
-    ):
+    elif "EXPLAIN_ERROR" in intent:
         return explain_error(query)
 
     else:
