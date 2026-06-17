@@ -41,7 +41,7 @@ def load_collection():
     chroma_client = chromadb.PersistentClient(path=db_path)
 
     collection = chroma_client.get_or_create_collection(
-        name="airflow_docs"
+        name="airflow"
     )
 
     return collection
