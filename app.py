@@ -47,10 +47,7 @@ def load_collection():
     return collection
 
 collection = load_collection()
-st.sidebar.write(
-    "Documents Loaded:",
-    collection.count()
-)
+
 # ==========================
 # EMBEDDING MODEL
 # ==========================
