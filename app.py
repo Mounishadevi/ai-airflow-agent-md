@@ -20,7 +20,7 @@ client = genai.Client(
     api_key=os.getenv("GEMINI_API_KEY")
 )
 
-MODEL_NAME = "models/gemini-2.0-flash"
+MODEL_NAME = "models/gemini-2.5-flash"
 
 # ==========================
 # CHAT HISTORY
