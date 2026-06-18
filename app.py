@@ -48,6 +48,10 @@ def load_collection():
 
 collection = load_collection()
 
+
+st.write("📁 Current directory:", os.getcwd())
+st.write("📄 Files found:", os.listdir("."))
+
 # ==========================
 # EMBEDDING MODEL
 # ==========================
