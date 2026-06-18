@@ -30,25 +30,18 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
 # ==========================
-# CHROMADB
+# CHROMADB - EphemeralClient (works perfectly on Streamlit Cloud)
 # ==========================
-
 
 @st.cache_resource
 def load_collection():
-
-    db_path = os.path.abspath("./chroma_db")
-
-    chroma_client = chromadb.PersistentClient(path=db_path)
-
+    chroma_client = chromadb.EphemeralClient()
     collection = chroma_client.get_or_create_collection(
         name="airflow"
     )
-
     return collection
 
 collection = load_collection()
-
 
 # ==========================
 # EMBEDDING MODEL
@@ -56,27 +49,22 @@ collection = load_collection()
 
 @st.cache_resource
 def load_embedding_model():
-
     return SentenceTransformer("all-MiniLM-L6-v2")
 
 embedding_model = load_embedding_model()
 
 # ==========================
 # AUTO-INGEST KNOWLEDGE BASE
-# (Runs once, automatically, if the ChromaDB collection is empty.
-# This is what makes the agent self-sufficient on Streamlit Cloud —
-# a fresh deploy has no pre-populated chroma_db folder, so without
-# this step RAG Search would always retrieve nothing.)
 # ==========================
 
-KB_FOLDERS = ["agent_docs", "airflow_kb"]
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+KB_FOLDERS = [
+    os.path.join(BASE_DIR, "agent_docs"),
+    os.path.join(BASE_DIR, "airflow_kb")
+]
 
 def ingest_knowledge_base():
-    """
-    Walks each folder in KB_FOLDERS, embeds every .md file, and upserts
-    it into the ChromaDB collection. Returns (added_count, error_list)
-    so the caller can report exactly what happened.
-    """
 
     added = 0
     errors = []
@@ -84,7 +72,7 @@ def ingest_knowledge_base():
     for folder in KB_FOLDERS:
 
         if not os.path.isdir(folder):
-            errors.append(f"Folder '{folder}' not found in the app directory — skipped.")
+            errors.append(f"Folder '{folder}' not found — skipped.")
             continue
 
         for filename in sorted(os.listdir(folder)):
@@ -99,10 +87,10 @@ def ingest_knowledge_base():
                     text = f.read()
 
                 if not text.strip():
-                    errors.append(f"'{folder}/{filename}' is empty — skipped.")
+                    errors.append(f"'{filename}' is empty — skipped.")
                     continue
 
-                doc_id = f"{folder}::{filename}"
+                doc_id = f"{os.path.basename(folder)}::{filename}"
                 embedding = embedding_model.encode(text).tolist()
 
                 collection.upsert(
@@ -113,22 +101,22 @@ def ingest_knowledge_base():
                 added += 1
 
             except Exception as e:
-                errors.append(f"Failed to ingest '{folder}/{filename}': {e}")
+                errors.append(f"Failed to ingest '{filename}': {e}")
 
     return added, errors
 
+# ==========================
+# RUN INGEST ON STARTUP
+# ==========================
 
-# Check current collection size safely — collection.count() can itself
-# raise on some ChromaDB versions/states, so we don't let that crash the app.
 try:
     existing_count = collection.count()
 except Exception as e:
     existing_count = 0
-    st.warning(f"Could not check existing knowledge base size, assuming empty. Details: {e}")
 
 if existing_count == 0:
 
-    with st.spinner("First run detected — building knowledge base..."):
+    with st.spinner("Building knowledge base..."):
 
         try:
             added, ingestion_errors = ingest_knowledge_base()
@@ -136,29 +124,21 @@ if existing_count == 0:
             if added > 0:
                 st.success(f"✅ Knowledge base initialized: {added} document(s) loaded.")
             else:
-                st.warning(
-                    "⚠️ No documents were ingested. Make sure the 'agent_docs/' "
-                    "and 'airflow_kb/' folders exist in the app directory and "
-                    "contain .md files."
-                )
+                st.warning("⚠️ No documents were ingested.")
 
             if ingestion_errors:
-                with st.expander(f"⚠️ {len(ingestion_errors)} issue(s) during ingestion — click to view"):
+                with st.expander(f"⚠️ {len(ingestion_errors)} issue(s) during ingestion"):
                     for err in ingestion_errors:
                         st.write(f"- {err}")
 
         except Exception as e:
-            # Last-resort catch: ingestion failing should never crash the
-            # whole app — RAG Search will just retrieve nothing until fixed.
-            st.error(f"❌ Knowledge base ingestion failed unexpectedly: {e}")
+            st.error(f"❌ Ingestion failed: {e}")
 
 # ==========================
 # SAFE TEXT EXTRACTOR
-# (Gemini 2.5 Flash can return None text if it spends its whole
-# token budget on internal "thinking" before producing output)
 # ==========================
 
-def safe_text(response, fallback="Sorry, I couldn't generate a response for that. Could you rephrase the question?"):
+def safe_text(response, fallback="Sorry, I couldn't generate a response. Please rephrase."):
     try:
         if response and response.text:
             return response.text
@@ -174,13 +154,12 @@ def generate_dag(requirement):
 
     prompt = f"""
 You are a senior Apache Airflow engineer.
-
 Generate a production-ready Airflow DAG.
 
 Requirement:
 {requirement}
 
-Requirements:
+Rules:
 - Use default_args
 - Include retries
 - Include logging
@@ -199,7 +178,7 @@ Requirements:
         )
     )
 
-    return safe_text(response, fallback="Sorry, I couldn't generate the DAG. Please try rephrasing your requirement.")
+    return safe_text(response, fallback="Sorry, I couldn't generate the DAG. Please try rephrasing.")
 
 # ==========================
 # TOOL 2 - ERROR ANALYZER
@@ -211,12 +190,11 @@ def explain_error(error_text):
 You are an Airflow, Hive, Spark and ETL troubleshooting expert.
 
 Analyze:
-
 {error_text}
 
 Rules:
-- For common errors, provide Cause and Fix only.
-- For complex errors, provide:
+- For common errors: Cause and Fix only.
+- For complex errors:
   1. Root Cause
   2. Impact
   3. Fix
@@ -233,7 +211,7 @@ Rules:
         )
     )
 
-    return safe_text(response, fallback="Sorry, I couldn't analyze that error. Please try pasting it again.")
+    return safe_text(response, fallback="Sorry, I couldn't analyze that error. Please try again.")
 
 # ==========================
 # TOOL 3 - RAG SEARCH
@@ -250,10 +228,7 @@ def rag_search(question):
         )
         context = "\n\n".join(results["documents"][0]) if results["documents"] and results["documents"][0] else ""
     except Exception as e:
-        # If the collection is empty or the query otherwise fails,
-        # fall back to no context rather than crashing the whole request.
         context = ""
-        st.warning(f"RAG retrieval issue (continuing without retrieved context): {e}")
 
     prompt = f"""
 You are a senior Apache Airflow and ETL expert.
@@ -267,11 +242,10 @@ Question:
 {question}
 
 Rules:
-- Answer according to the complexity of the question.
-- Simple questions: answer in 2-4 sentences.
-- Conceptual questions: provide a medium-length explanation.
-- How-to questions: provide step-by-step guidance.
-- Comparison questions: use bullets or a table.
+- Simple questions: 2-4 sentences.
+- Conceptual questions: medium explanation.
+- How-to questions: step-by-step.
+- Comparison questions: bullets or table.
 - Generate code only if explicitly requested.
 - Do not mention the context source.
 - Be concise but complete.
@@ -286,40 +260,29 @@ Rules:
         )
     )
 
-    return safe_text(response, fallback="Sorry, I couldn't find a good answer to that. Could you rephrase the question?")
+    return safe_text(response, fallback="Sorry, I couldn't find a good answer. Please rephrase.")
 
 # ==========================
-# AGENT ROUTER (intent classification, not keyword matching)
+# AGENT ROUTER
 # ==========================
 
 def classify_intent(query):
 
     q = query.lower()
 
-    dag_generation_keywords = [
-        "generate dag",
-        "create dag",
-        "write dag",
-        "build dag",
-        "dag code",
-        "airflow code",
-        "create airflow dag",
-        "generate airflow dag"
+    dag_keywords = [
+        "generate dag", "create dag", "write dag",
+        "build dag", "dag code", "airflow code",
+        "create airflow dag", "generate airflow dag"
     ]
 
     error_keywords = [
-        "error",
-        "exception",
-        "traceback",
-        "failed",
-        "failure",
-        "ora-",
-        "sparkexception",
-        "hiveexception",
-        "task failed"
+        "error", "exception", "traceback", "failed",
+        "failure", "ora-", "sparkexception",
+        "hiveexception", "task failed"
     ]
 
-    if any(k in q for k in dag_generation_keywords):
+    if any(k in q for k in dag_keywords):
         return "GENERATE_DAG"
 
     if any(k in q for k in error_keywords):
@@ -333,24 +296,20 @@ def agent(query):
 
     if intent == "GENERATE_DAG":
         return generate_dag(query)
-
     elif intent == "EXPLAIN_ERROR":
         return explain_error(query)
-
     else:
         return rag_search(query)
-        
+
 # ==========================
-# UI HEADER
+# UI
 # ==========================
 
 st.title("🚀 AI-Powered Airflow Operations Agent")
-
 st.markdown("---")
 
 st.markdown("""
 ### 🤖 Capabilities
-
 - 📚 Airflow Q&A (RAG)
 - ⚙️ DAG Generation
 - 🚨 ETL / Airflow Error Analysis
@@ -358,6 +317,17 @@ st.markdown("""
 
 st.markdown("---")
 
+try:
+    doc_count = collection.count()
+    st.markdown(f"""
+### 📊 Knowledge Base Stats
+- 📄 **Documents Loaded:** {doc_count}
+- 📁 **Sources:** agent_docs + airflow_kb
+""")
+except:
+    pass
+
+st.markdown("---")
 
 # ==========================
 # INPUT
@@ -369,10 +339,6 @@ question = st.text_area(
     placeholder="Ask anything about Airflow, DAGs, or ETL errors"
 )
 
-# ==========================
-# SUBMIT
-# ==========================
-
 if st.button("Submit"):
 
     if not question.strip():
@@ -380,9 +346,7 @@ if st.button("Submit"):
         st.stop()
 
     try:
-
         with st.spinner("Agent Thinking..."):
-
             answer = agent(question)
 
         st.session_state.chat_history.append({
@@ -400,11 +364,8 @@ if st.button("Submit"):
 st.markdown("## 💬 Conversation History")
 
 for chat in reversed(st.session_state.chat_history):
-
     st.markdown("### 🧑 You")
     st.write(chat["question"])
-
     st.markdown("### 🤖 Agent")
     st.write(chat["answer"])
-
     st.markdown("---")
