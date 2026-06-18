@@ -115,7 +115,7 @@ The knowledge base will auto-ingest into ChromaDB the first time the app runs, a
 To re-ingest manually at any time:
 
 ```
-python ingest.py
+python ingest_docs.py
 ```
 
 ---
