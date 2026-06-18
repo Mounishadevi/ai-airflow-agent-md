@@ -93,13 +93,13 @@ On first run, if the ChromaDB collection is empty, the app automatically embeds 
 ## 📸 Demo Screenshots
 
 ### Main UI
-![Main UI](pic1.png)
+![Main UI](REF1.png)
 
 ### DAG Generation
-![DAG Generation](pic2.png)
+![DAG Generation](REF2.png)
 
 ### Error Analysis
-![Error Analysis](pic3.png)
+![Error Analysis](REF3.png)
 
 ---
 
