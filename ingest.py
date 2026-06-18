@@ -1,36 +1,62 @@
+"""
+Run this once to load BOTH the agent's self-knowledge docs AND the general
+Airflow knowledge base docs into your existing ChromaDB "airflow" collection.
+
+This gives your RAG Search tool two things it doesn't currently have:
+  1. Real Airflow/Spark/Hive domain knowledge to answer Q&A questions
+  2. Self-knowledge about the agent's own architecture and tools
+
+Usage:
+    1. Place this script in the same folder as your app.py (so it finds
+       ./chroma_db the same way your app does).
+    2. Put both folders next to this script:
+         - agent_docs/   (self-knowledge docs)
+         - airflow_kb/    (general Airflow/Spark/Hive knowledge docs)
+    3. Run: python ingest_docs.py
+"""
+
+import os
 import chromadb
 from sentence_transformers import SentenceTransformer
 
-# 1. Load embedding model (SAME as app.py)
-model = SentenceTransformer("all-MiniLM-L6-v2")
+FOLDERS = ["agent_docs", "airflow_kb"]
 
-# 2. Create / open ChromaDB
-client = chromadb.PersistentClient(path="./chroma_db")
-collection = client.get_or_create_collection("airflow")
+def main():
+    db_path = os.path.abspath("./chroma_db")
+    chroma_client = chromadb.PersistentClient(path=db_path)
+    collection = chroma_client.get_or_create_collection(name="airflow")
 
-# 3. Sample knowledge (you can expand later)
-docs = [
-    "Airflow DAG defines workflow of tasks.",
-    "XCom is used to pass data between tasks.",
-    "LocalExecutor runs tasks on the same machine.",
-    "CeleryExecutor is used for distributed execution.",
-    "ORA-00942 means table or view does not exist or no permission.",
-    "Retries allow failed tasks to rerun automatically.",
-    "Hive is a data warehouse system on Hadoop.",
-    "Sqoop transfers data between Oracle and Hive."
-]
+    embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
-# 4. Convert to embeddings
-embeddings = model.encode(docs).tolist()
+    added = 0
+    for folder in FOLDERS:
+        if not os.path.isdir(folder):
+            print(f"Folder '{folder}' not found, skipping.")
+            continue
 
-ids = [f"doc_{i}" for i in range(len(docs))]
+        for filename in sorted(os.listdir(folder)):
+            if not filename.endswith(".md"):
+                continue
 
-# 5. Store in ChromaDB
-collection.add(
-    documents=docs,
-    embeddings=embeddings,
-    ids=ids
-)
+            path = os.path.join(folder, filename)
+            with open(path, "r", encoding="utf-8") as f:
+                text = f.read()
 
-print("✅ Ingestion complete!")
-print("Total documents:", collection.count())
+            doc_id = f"{folder}::{filename}"
+            embedding = embedding_model.encode(text).tolist()
+
+            # upsert so re-running this script doesn't create duplicates
+            collection.upsert(
+                ids=[doc_id],
+                documents=[text],
+                embeddings=[embedding],
+            )
+            added += 1
+            print(f"Ingested: {folder}/{filename}")
+
+    count = collection.count()
+    print(f"\nDone. {added} document(s) ingested this run.")
+    print(f"Collection 'airflow' now has {count} total document(s).")
+
+if __name__ == "__main__":
+    main()
