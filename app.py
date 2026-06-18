@@ -60,6 +60,97 @@ def load_embedding_model():
 embedding_model = load_embedding_model()
 
 # ==========================
+# AUTO-INGEST KNOWLEDGE BASE
+# (Runs once, automatically, if the ChromaDB collection is empty.
+# This is what makes the agent self-sufficient on Streamlit Cloud —
+# a fresh deploy has no pre-populated chroma_db folder, so without
+# this step RAG Search would always retrieve nothing.)
+# ==========================
+
+KB_FOLDERS = ["agent_docs", "airflow_kb"]
+
+def ingest_knowledge_base():
+    """
+    Walks each folder in KB_FOLDERS, embeds every .md file, and upserts
+    it into the ChromaDB collection. Returns (added_count, error_list)
+    so the caller can report exactly what happened.
+    """
+
+    added = 0
+    errors = []
+
+    for folder in KB_FOLDERS:
+
+        if not os.path.isdir(folder):
+            errors.append(f"Folder '{folder}' not found in the app directory — skipped.")
+            continue
+
+        for filename in sorted(os.listdir(folder)):
+
+            if not filename.endswith(".md"):
+                continue
+
+            path = os.path.join(folder, filename)
+
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    text = f.read()
+
+                if not text.strip():
+                    errors.append(f"'{folder}/{filename}' is empty — skipped.")
+                    continue
+
+                doc_id = f"{folder}::{filename}"
+                embedding = embedding_model.encode(text).tolist()
+
+                collection.upsert(
+                    ids=[doc_id],
+                    documents=[text],
+                    embeddings=[embedding],
+                )
+                added += 1
+
+            except Exception as e:
+                errors.append(f"Failed to ingest '{folder}/{filename}': {e}")
+
+    return added, errors
+
+
+# Check current collection size safely — collection.count() can itself
+# raise on some ChromaDB versions/states, so we don't let that crash the app.
+try:
+    existing_count = collection.count()
+except Exception as e:
+    existing_count = 0
+    st.warning(f"Could not check existing knowledge base size, assuming empty. Details: {e}")
+
+if existing_count == 0:
+
+    with st.spinner("First run detected — building knowledge base..."):
+
+        try:
+            added, ingestion_errors = ingest_knowledge_base()
+
+            if added > 0:
+                st.success(f"✅ Knowledge base initialized: {added} document(s) loaded.")
+            else:
+                st.warning(
+                    "⚠️ No documents were ingested. Make sure the 'agent_docs/' "
+                    "and 'airflow_kb/' folders exist in the app directory and "
+                    "contain .md files."
+                )
+
+            if ingestion_errors:
+                with st.expander(f"⚠️ {len(ingestion_errors)} issue(s) during ingestion — click to view"):
+                    for err in ingestion_errors:
+                        st.write(f"- {err}")
+
+        except Exception as e:
+            # Last-resort catch: ingestion failing should never crash the
+            # whole app — RAG Search will just retrieve nothing until fixed.
+            st.error(f"❌ Knowledge base ingestion failed unexpectedly: {e}")
+
+# ==========================
 # SAFE TEXT EXTRACTOR
 # (Gemini 2.5 Flash can return None text if it spends its whole
 # token budget on internal "thinking" before producing output)
@@ -135,7 +226,7 @@ Rules:
         model=MODEL_NAME,
         contents=prompt,
         config=types.GenerateContentConfig(
-            max_output_tokens=600,
+            max_output_tokens=1000,
             thinking_config=types.ThinkingConfig(thinking_budget=0)
         )
     )
@@ -150,12 +241,17 @@ def rag_search(question):
 
     query_embedding = embedding_model.encode(question).tolist()
 
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=3
-    )
-
-    context = "\n\n".join(results["documents"][0])
+    try:
+        results = collection.query(
+            query_embeddings=[query_embedding],
+            n_results=3
+        )
+        context = "\n\n".join(results["documents"][0]) if results["documents"] and results["documents"][0] else ""
+    except Exception as e:
+        # If the collection is empty or the query otherwise fails,
+        # fall back to no context rather than crashing the whole request.
+        context = ""
+        st.warning(f"RAG retrieval issue (continuing without retrieved context): {e}")
 
     prompt = f"""
 You are a senior Apache Airflow and ETL expert.
@@ -183,7 +279,7 @@ Rules:
         model=MODEL_NAME,
         contents=prompt,
         config=types.GenerateContentConfig(
-            max_output_tokens=500,
+            max_output_tokens=800,
             thinking_config=types.ThinkingConfig(thinking_budget=0)
         )
     )
