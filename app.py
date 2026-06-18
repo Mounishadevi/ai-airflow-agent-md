@@ -356,6 +356,17 @@ st.markdown("""
 
 st.markdown("---")
 
+# Show knowledge base stats
+try:
+    doc_count = collection.count()
+    st.markdown(f"""
+    ### 📊 Knowledge Base Stats
+    - 📄 **Documents Loaded:** {doc_count}
+    - 📁 **Sources:** agent_docs + airflow_kb
+    """)
+except:
+    pass
+
 # ==========================
 # INPUT
 # ==========================
