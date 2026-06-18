@@ -174,7 +174,7 @@ Rules:
         contents=prompt,
         config=types.GenerateContentConfig(
             max_output_tokens=4000,
-            thinking_config=types.ThinkingConfig(thinking_budget=256)
+            thinking_config=types.ThinkingConfig(thinking_budget=512)
         )
     )
 
