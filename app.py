@@ -35,13 +35,7 @@ if "chat_history" not in st.session_state:
 
 @st.cache_resource
 def load_collection():
-    import shutil
     db_path = os.path.abspath("./chroma_db")
-    
-    # Delete old chroma_db completely on every fresh deploy
-    if os.path.exists(db_path):
-        shutil.rmtree(db_path)
-    
     chroma_client = chromadb.PersistentClient(path=db_path)
     collection = chroma_client.get_or_create_collection(
         name="airflow"
