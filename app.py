@@ -226,7 +226,7 @@ Rules:
         model=MODEL_NAME,
         contents=prompt,
         config=types.GenerateContentConfig(
-            max_output_tokens=1000,
+            max_output_tokens=600,
             thinking_config=types.ThinkingConfig(thinking_budget=0)
         )
     )
@@ -279,7 +279,7 @@ Rules:
         model=MODEL_NAME,
         contents=prompt,
         config=types.GenerateContentConfig(
-            max_output_tokens=800,
+            max_output_tokens=500,
             thinking_config=types.ThinkingConfig(thinking_budget=0)
         )
     )
