@@ -317,17 +317,14 @@ st.markdown("""
 
 st.markdown("---")
 
-try:
-    doc_count = collection.count()
-    st.markdown(f"""
-### 📊 Knowledge Base Stats
-- 📄 **Documents Loaded:** {doc_count}
-- 📁 **Sources:** agent_docs + airflow_kb
-""")
-except:
-    pass
-
-st.markdown("---")
+with st.sidebar:
+    st.markdown("### 📊 Knowledge Base Stats")
+    try:
+        doc_count = collection.count()
+        st.success(f"📄 Documents Loaded: {doc_count}")
+        st.info("📁 Sources: agent_docs + airflow_kb")
+    except:
+        st.warning("Knowledge base not loaded")
 
 # ==========================
 # INPUT
