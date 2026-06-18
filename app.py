@@ -35,18 +35,19 @@ if "chat_history" not in st.session_state:
 
 @st.cache_resource
 def load_collection():
+
     db_path = os.path.abspath("./chroma_db")
+
     chroma_client = chromadb.PersistentClient(path=db_path)
+
     collection = chroma_client.get_or_create_collection(
         name="airflow"
     )
+
     return collection
 
 collection = load_collection()
 
-
-st.write("📁 Current directory:", os.getcwd())
-st.write("📄 Files found:", os.listdir("."))
 
 # ==========================
 # EMBEDDING MODEL
